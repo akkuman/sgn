@@ -16,10 +16,9 @@ import (
 
 	sgn "github.com/EgeBalci/sgn/pkg"
 	"github.com/briandowns/spinner"
+	"github.com/fatih/color"
 
 	"syscall/js"
-
-	"github.com/fatih/color"
 )
 
 // Verbose output mode
@@ -28,6 +27,7 @@ var spinr = spinner.New(spinner.CharSets[9], 50*time.Millisecond)
 
 func init() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	printBanner()
 }
 
 func sgnFunc(this js.Value, args []js.Value) interface{} {
@@ -78,7 +78,6 @@ func sgnExec(arch, encCount, obsLevel int, encDecoder, asciPayload, saveRegister
 		payload, err = encode(encoder, source)
 		eror(err)
 	}
-	js.Global().Get("console").Call("log", fmt.Sprintf("%v", payload))
 	res["result"] = hex.EncodeToString(payload)
 	return res
 }
@@ -91,12 +90,10 @@ func main() {
 
 // Encode function is the primary encode method for SGN
 func encode(encoder *sgn.Encoder, payload []byte) ([]byte, error) {
-	red := color.New(color.Bold, color.FgRed).SprintfFunc()
-	green := color.New(color.Bold, color.FgGreen).SprintfFunc()
 	var final []byte
 
 	if encoder.SaveRegisters {
-		printVerbose("Adding safe register suffix...")
+		printLog("Adding safe register suffix...")
 		final = append(final, sgn.SafeRegisterSuffix[encoder.GetArchitecture()]...)
 	}
 
@@ -108,10 +105,10 @@ func encode(encoder *sgn.Encoder, payload []byte) ([]byte, error) {
 	payload = append(garbage, payload...)
 	encoder.ObfuscationLimit -= len(garbage)
 
-	printVerbose("Ciphering payload...")
+	printLog("Ciphering payload...")
 	ciperedPayload := sgn.CipherADFL(payload, encoder.Seed)
 	decoderAssembly := encoder.NewDecoderAssembly(len(ciperedPayload))
-	printVerbose("Selected decoder: %s", green("\n%s\n", decoderAssembly))
+	printLog("Selected decoder: %s", decoderAssembly))
 	decoder, ok := encoder.Assemble(decoderAssembly)
 	if !ok {
 		return nil, errors.New("decoder assembly failed")
@@ -123,7 +120,7 @@ func encode(encoder *sgn.Encoder, payload []byte) ([]byte, error) {
 	} else {
 		schemaSize := ((len(encodedPayload) - len(ciperedPayload)) / (encoder.GetArchitecture() / 8)) + 1
 		randomSchema := encoder.NewCipherSchema(schemaSize)
-		printVerbose("Cipher schema: %s", red("\n\n%s", sgn.GetSchemaTable(randomSchema)))
+		printLog("Cipher schema: %s", sgn.GetSchemaTable(randomSchema)))
 		obfuscatedEncodedPayload := encoder.SchemaCipher(encodedPayload, 0, randomSchema)
 		final, err = encoder.AddSchemaDecoder(obfuscatedEncodedPayload, randomSchema)
 		if err != nil {
@@ -133,7 +130,7 @@ func encode(encoder *sgn.Encoder, payload []byte) ([]byte, error) {
 	}
 
 	if encoder.SaveRegisters {
-		printVerbose("Adding safe register prefix...")
+		printLog("Adding safe register prefix...")
 		final = append(sgn.SafeRegisterPrefix[encoder.GetArchitecture()], final...)
 	}
 
@@ -174,42 +171,19 @@ func eror(err error) {
 		pc, _, _, ok := runtime.Caller(1)
 		details := runtime.FuncForPC(pc)
 		if ok && details != nil {
-			log.Fatalf("[%s] ERROR: %s\n", strings.ToUpper(strings.Split(details.Name(), ".")[1]), err)
+			printLog("[%s] ERROR: %s\n", strings.ToUpper(strings.Split(details.Name(), ".")[1]), err)
 		} else {
-			log.Fatalf("[UNKNOWN] ERROR: %s\n", err)
+			printLog("[UNKNOWN] ERROR: %s\n", err)
 		}
+		os.Exit(1)
 	}
 }
 
-func printStatus(format string, a ...interface{}) {
-	yellow := color.New(color.Bold, color.FgYellow).PrintfFunc()
-	yellow("[*] ")
-	fmt.Printf(format+"\n", a...)
-}
-
-func printGood(format string, a ...interface{}) {
-	green := color.New(color.Bold, color.FgGreen).PrintfFunc()
-	green("[+] ")
-	fmt.Printf(format+"\n", a...)
-}
-
-func printVerbose(format string, a ...interface{}) {
-	if Verbose {
-		yellow := color.New(color.Bold, color.FgYellow)
-		yellow.Print("[*] ")
-		fmt.Printf(format+"\n", a...)
-	}
-	if !strings.Contains(format, ":") {
-		spinr.Suffix = fmt.Sprintf(" "+format, a...)
-	}
-}
-
-func printHelp() {
-	fmt.Printf("Usage: %s [OPTIONS] <FILE>\n", os.Args[0])
-	flag.PrintDefaults()
+func printLog(format string, a ...interface{}) {
+	js.Global().Get("console").Call("log", fmt.Sprintf(format, a...))
 }
 
 func printBanner() {
 	banner, _ := base64.StdEncoding.DecodeString("ICAgICAgIF9fICAgXyBfXyAgICAgICAgX18gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgXyAKICBfX18gLyAvICAoXykgL19fX19fIF8vIC9fX19fIF8gIF9fXyBfX19fIF8gIF9fXyAgX19fIF8oXykKIChfLTwvIF8gXC8gLyAgJ18vIF8gYC8gX18vIF8gYC8gLyBfIGAvIF8gYC8gLyBfIFwvIF8gYC8gLyAKL19fXy9fLy9fL18vXy9cX1xcXyxfL1xfXy9cXyxfLyAgXF8sIC9cXyxfLyAvXy8vXy9cXyxfL18vICAKPT09PT09PT1bQXV0aG9yOi1FZ2UtQmFsY8SxLV09PT09L19fXy89PT09PT09djIuMC4wPT09PT09PT09ICAKICAgIOKUu+KUgeKUuyDvuLXjg70oYNCUwrQp776J77i1IOKUu+KUgeKUuyAgICAgICAgICAgKOODjiDjgpzQlOOCnCnjg44g77i1IOS7leaWueOBjOOBquOBhAo=")
-	fmt.Println(string(banner))
+	printLog(string(banner))
 }
