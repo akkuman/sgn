@@ -5,25 +5,16 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
-	"flag"
 	"fmt"
-	"log"
 	"os"
 	"runtime"
 	"strings"
-	"time"
 	"unicode"
 
 	sgn "github.com/EgeBalci/sgn/pkg"
-	"github.com/briandowns/spinner"
-	"github.com/fatih/color"
 
 	"syscall/js"
 )
-
-// Verbose output mode
-var Verbose bool
-var spinr = spinner.New(spinner.CharSets[9], 50*time.Millisecond)
 
 func init() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
@@ -108,7 +99,7 @@ func encode(encoder *sgn.Encoder, payload []byte) ([]byte, error) {
 	printLog("Ciphering payload...")
 	ciperedPayload := sgn.CipherADFL(payload, encoder.Seed)
 	decoderAssembly := encoder.NewDecoderAssembly(len(ciperedPayload))
-	printLog("Selected decoder: %s", decoderAssembly))
+	printLog("Selected decoder: %s", decoderAssembly)
 	decoder, ok := encoder.Assemble(decoderAssembly)
 	if !ok {
 		return nil, errors.New("decoder assembly failed")
@@ -120,7 +111,7 @@ func encode(encoder *sgn.Encoder, payload []byte) ([]byte, error) {
 	} else {
 		schemaSize := ((len(encodedPayload) - len(ciperedPayload)) / (encoder.GetArchitecture() / 8)) + 1
 		randomSchema := encoder.NewCipherSchema(schemaSize)
-		printLog("Cipher schema: %s", sgn.GetSchemaTable(randomSchema)))
+		printLog("Cipher schema: %s", sgn.GetSchemaTable(randomSchema))
 		obfuscatedEncodedPayload := encoder.SchemaCipher(encodedPayload, 0, randomSchema)
 		final, err = encoder.AddSchemaDecoder(obfuscatedEncodedPayload, randomSchema)
 		if err != nil {
