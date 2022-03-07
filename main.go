@@ -7,7 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"runtime"
@@ -17,6 +16,8 @@ import (
 
 	sgn "github.com/EgeBalci/sgn/pkg"
 	"github.com/briandowns/spinner"
+
+	"syscall/js"
 
 	"github.com/fatih/color"
 )
@@ -29,104 +30,63 @@ func init() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 }
 
-func main() {
+func sgnFunc(this js.Value, args []js.Value) interface{} {
+	arch := args[0].Int()
+	encCount := args[1].Int()
+	obsLevel := args[2].Int()
+	encDecoder := args[3].Bool()
+	asciPayload := args[4].Bool()
+	saveRegisters := args[5].Bool()
+	badChars := args[6].String()
+	input := args[7].String()
+	return js.ValueOf(sgnExec(arch, encCount, obsLevel, encDecoder, asciPayload, saveRegisters, badChars, input))
+}
 
-	printBanner()
-	help := flag.Bool("h", false, "Print help")
-	output := flag.String("o", "", "Encoded output binary name")
-	arch := flag.Int("a", 32, "Binary architecture (32/64)")
-	encCount := flag.Int("c", 1, "Number of times to encode the binary (increases overall size)")
-	obsLevel := flag.Int("max", 20, "Maximum number of bytes for obfuscation")
-	encDecoder := flag.Bool("plain-decoder", false, "Do not encode the decoder stub")
-	asciPayload := flag.Bool("asci", false, "Generates a full ASCI printable payload (takes very long time to bruteforce)")
-	saveRegisters := flag.Bool("safe", false, "Do not modify any register values")
-	badChars := flag.String("badchars", "", "Don't use specified bad characters given in hex format (\\x00\\x01\\x02...)")
-	flag.BoolVar(&Verbose, "v", false, "More verbose output")
-	flag.Parse()
-
-	if len(os.Args) < 2 || *help {
-		printHelp()
-		os.Exit(1)
+func sgnExec(arch, encCount, obsLevel int, encDecoder, asciPayload, saveRegisters bool, badChars, input string) map[string]interface{} {
+	var res = map[string]interface{}{
+		"err": nil,
+		"result": nil,
 	}
-
-	// Setup a encoder struct
-	input := os.Args[len(os.Args)-1]
+	source, err := hex.DecodeString(strings.ReplaceAll(input, `\x`, ""))
+	if err != nil {
+		res["err"] = err
+		return res
+	}
 	payload := []byte{}
 	encoder := sgn.NewEncoder()
-	encoder.ObfuscationLimit = *obsLevel
-	encoder.PlainDecoder = *encDecoder
-	encoder.EncodingCount = *encCount
-	encoder.SaveRegisters = *saveRegisters
-	eror(encoder.SetArchitecture(*arch))
-	file, err := ioutil.ReadFile(input)
-	eror(err)
+	encoder.ObfuscationLimit = obsLevel
+	encoder.PlainDecoder = encDecoder
+	encoder.EncodingCount = encCount
+	encoder.SaveRegisters = saveRegisters
+	eror(encoder.SetArchitecture(arch))
 
-	if !Verbose {
-		spinr.Start()
-	}
-
-	// Print encoder params...
-	printVerbose("Architecture: x%d", encoder.GetArchitecture())
-	printVerbose("Encode Count: %d", encoder.EncodingCount)
-	printVerbose("Max. Obfuscation Size: %d", encoder.ObfuscationLimit)
-	printVerbose("Bad Characters: %x", *badChars)
-	printVerbose("ASCII Mode: %t", *asciPayload)
-	printVerbose("Plain Decoder: %t", encoder.PlainDecoder)
-	printVerbose("Safe Registers: %t", encoder.SaveRegisters)
-	// Calculate evarage garbage instrunction size
-	average, err := encoder.CalculateAverageGarbageInstructionSize()
-	eror(err)
-	printVerbose("Avg. Garbage Size: %f", average)
-
-	if *badChars != "" || *asciPayload {
-
-		// Need to disable verbosity now
-		if Verbose {
-			spinr.Start()
-			Verbose = false
-		}
-		spinr.Suffix = " Bruteforcing bad characters..."
-
-		badBytes, err := hex.DecodeString(strings.ReplaceAll(*badChars, `\x`, ""))
+	if badChars != "" || asciPayload {
+		badBytes, err := hex.DecodeString(strings.ReplaceAll(badChars, `\x`, ""))
 		eror(err)
 
 		for {
-			p, err := encode(encoder, file)
+			p, err := encode(encoder, source)
 			eror(err)
 
-			if (*asciPayload && isASCIIPrintable(string(p))) || (len(badBytes) > 0 && !containsBytes(p, badBytes)) {
+			if (asciPayload && isASCIIPrintable(string(p))) || (len(badBytes) > 0 && !containsBytes(p, badBytes)) {
 				payload = p
 				break
 			}
 			encoder.Seed = (encoder.Seed + 1) % 255
 		}
-		spinr.Stop()
-		printStatus("Success ᕕ( ᐛ )ᕗ")
 	} else {
-		printVerbose("Encoding payload...")
-		payload, err = encode(encoder, file)
+		payload, err = encode(encoder, source)
 		eror(err)
 	}
+	js.Global().Get("console").Call("log", fmt.Sprintf("%v", payload))
+	res["result"] = hex.EncodeToString(payload)
+	return res
+}
 
-	spinr.Stop()
-	if *output == "" {
-		*output = input + ".sgn"
-	}
-
-	printStatus("Input: %s", input)
-	printStatus("Input Size: %d", len(file))
-	printStatus("Outfile: %s", *output)
-	out, err := os.OpenFile(*output, os.O_RDWR|os.O_CREATE, 0755)
-	eror(err)
-	_, err = out.Write(payload)
-	eror(err)
-	outputSize := len(payload)
-	if Verbose {
-		color.Blue("\n" + hex.Dump(payload) + "\n")
-	}
-
-	printGood("Final size: %d", outputSize)
-	printGood("All done ＼(＾O＾)／")
+func main() {
+	done := make(chan int, 0)
+	js.Global().Set("sgnFunc", js.FuncOf(sgnFunc))
+	<-done
 }
 
 // Encode function is the primary encode method for SGN

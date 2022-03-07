@@ -6,7 +6,7 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/EgeBalci/keystone-go"
+	"syscall/js"
 )
 
 // REG structure for registers
@@ -196,68 +196,87 @@ func (encoder Encoder) GetSafeRandomRegister(size int, excludes ...string) strin
 
 }
 
+func GetKeystone() js.Value {
+	return js.Global().Get("ks")
+}
+
 // Assemble assembes the given instructions
 // and return a byte array with a boolean value indicating wether the operation is successful or not
 func (encoder Encoder) Assemble(asm string) ([]byte, bool) {
-	var mode keystone.Mode
+	var mode js.Value
 	switch encoder.architecture {
 	case 32:
-		mode = keystone.MODE_32
+		mode = GetKeystone().Get("MODE_32")
 	case 64:
-		mode = keystone.MODE_64
+		mode = GetKeystone().Get("MODE_64")
 	default:
 		return nil, false
 	}
 
-	ks, err := keystone.New(keystone.ARCH_X86, mode)
-	if err != nil {
+	keystoneFunc := GetKeystone().Get("Keystone")
+
+	ks := keystoneFunc.New(GetKeystone().Get("ARCH_X86"), mode)
+	if !ks.Truthy() {
 		return nil, false
 	}
-	defer ks.Close()
+	defer ks.Call("close")
 
 	//err = ks.Option(keystone.OPT_SYNTAX, keystone.OPT_SYNTAX_INTEL)
 	//err = ks.Option(keystone.OPT_SYNTAX, keystone.KS_OPT_SYNTAX_NASM)
-	err = ks.Option(keystone.OPT_SYNTAX, keystone.OPT_SYNTAX_INTEL)
-	if err != nil {
+	ks.Call("option", GetKeystone().Get("OPT_SYNTAX"), GetKeystone().Get("OPT_SYNTAX_INTEL"))
+	v := ks.Call("asm", asm)
+	if !v.Truthy() {
 		return nil, false
 	}
-	//log.Println(asm)
-	bin, _, ok := ks.Assemble(asm, 0)
+	ok := !v.Get("failed").Bool()
+	if !v.Get("mc").Truthy() {
+		return nil, false
+	}
+	var bin = make([]byte, v.Get("mc").Length())
+	for i:=0; i<v.Get("mc").Length(); i++ {
+		bin[i] = byte(v.Get("mc").Index(i).Int())
+	}
 	return bin, ok
 }
 
 // GetAssemblySize assembes the given  instructions and returns the total instruction size
 // if assembly fails return value is -1
 func (encoder Encoder) GetAssemblySize(asm string) int {
-	var mode keystone.Mode
+	var mode js.Value
 	switch encoder.architecture {
 	case 32:
-		mode = keystone.MODE_32
+		mode = GetKeystone().Get("MODE_32")
 	case 64:
-		mode = keystone.MODE_64
+		mode = GetKeystone().Get("MODE_64")
 	default:
 		return -1
 	}
 
-	ks, err := keystone.New(keystone.ARCH_X86, mode)
-	if err != nil {
+	keystoneFunc := GetKeystone().Get("Keystone")
+
+	ks := keystoneFunc.New(GetKeystone().Get("ARCH_X86"), mode)
+	if !ks.Truthy() {
 		return -1
 	}
-	defer ks.Close()
+	defer ks.Call("close")
 
 	//err = ks.Option(keystone.OPT_SYNTAX, keystone.OPT_SYNTAX_INTEL)
 	//err = ks.Option(keystone.OPT_SYNTAX, keystone.KS_OPT_SYNTAX_NASM)
-	err = ks.Option(keystone.OPT_SYNTAX, keystone.OPT_SYNTAX_INTEL)
-	if err != nil {
+	ks.Call("option", GetKeystone().Get("OPT_SYNTAX"), GetKeystone().Get("OPT_SYNTAX_INTEL"))
+
+	//log.Println(asm)
+	v := ks.Call("asm", asm)
+	if !v.Truthy() {
 		return -1
 	}
-	//log.Println(asm)
-	bin, _, ok := ks.Assemble(asm, 0)
-
+	ok := v.Get("failed").Bool()
 	if !ok {
 		return -1
 	}
-	return len(bin)
+	if !v.Get("mc").Truthy() {
+		return -1
+	}
+	return v.Get("mc").Length()
 }
 
 // GenerateIPToStack function generates instructions series that pushes the instruction pointer to stack
